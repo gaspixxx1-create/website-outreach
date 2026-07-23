@@ -1,3 +1,4 @@
 *.csv
+!contacted.csv
 run_global.log
 emails/
