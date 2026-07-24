@@ -52,7 +52,14 @@ def main():
     ap.add_argument("--per-city-cap", type=int, default=40, help="max candidates to actually fetch/check per city")
     ap.add_argument("--exclude-file", default="contacted.csv",
                      help="CSV of previously-contacted company urls (one per line) to skip")
+    ap.add_argument("--cities", default="", help="semicolon-separated city list to override the default CITIES")
+    ap.add_argument("--country", default="", help="ISO 3166-1 alpha-2 country code for a single nationwide query instead of per-city (e.g. NL)")
+    ap.add_argument("--check-cap", type=int, default=300, help="[--country mode] max candidates to check nationwide")
     args = ap.parse_args()
+
+    global CITIES
+    if args.cities:
+        CITIES = [c.strip() for c in args.cities.split(";") if c.strip()]
 
     excluded = load_excluded(args.exclude_file)
     print(f"Excluding {len(excluded)} previously-contacted companies from {args.exclude_file}", file=sys.stderr)
@@ -60,6 +67,41 @@ def main():
     qualified = []
     all_rows = []
     seen_names = set()
+
+    if args.country:
+        print(f"\n=== Nationwide: {args.country.upper()} ===", file=sys.stderr)
+        query = fc.build_overpass_country_query(args.niche, args.country)
+        result = fc.query_overpass(query)
+
+        companies = []
+        for el in result.get("elements", []):
+            row = fc.extract_row(el)
+            if row and row["url"] and row["name"] not in seen_names and row["url"].strip().lower() not in excluded:
+                seen_names.add(row["name"])
+                companies.append(row)
+
+        print(f"  found {len(companies)} candidates with a listed website nationwide", file=sys.stderr)
+        random.shuffle(companies)
+        companies = companies[: args.check_cap]
+
+        for i, c in enumerate(companies, 1):
+            if len(qualified) >= args.target:
+                break
+            analysis = aw.analyze_one(c["name"], c["url"], check_contact_page=True)
+            merged = {**c, "city": args.country.upper(), **analysis}
+            all_rows.append(merged)
+            if analysis["verdict"] == "bad" and analysis.get("found_email"):
+                qualified.append(merged)
+                print(f"  [{len(qualified)}/{args.target}] ({i}/{len(companies)}) BAD+EMAIL: {c['name']} -> {analysis['found_email']}", file=sys.stderr)
+            elif i % 20 == 0:
+                print(f"  ...checked {i}/{len(companies)}, {len(qualified)} qualified so far", file=sys.stderr)
+            time.sleep(0.2)
+
+        write_outputs(args, all_rows, qualified)
+        print(f"\nChecked {len(all_rows)} companies nationwide in {args.country.upper()}.", file=sys.stderr)
+        print(f"Qualified: {len(qualified)} -> {args.output.replace('.csv', '_qualified.csv')}", file=sys.stderr)
+        return
+
     cities = CITIES[:]
     random.shuffle(cities)
 
@@ -80,6 +122,7 @@ def main():
         except Exception as e:
             print(f"  skip ({e})", file=sys.stderr)
             continue
+        time.sleep(2)  # avoid Overpass 429 rate limiting between cities
 
         companies = []
         for el in result.get("elements", []):
@@ -103,6 +146,12 @@ def main():
                 print(f"  [{len(qualified)}/{args.target}] BAD+EMAIL: {c['name']} -> {analysis['found_email']}", file=sys.stderr)
             time.sleep(0.2)
 
+    write_outputs(args, all_rows, qualified)
+    print(f"\nChecked {len(all_rows)} companies total across {len(CITIES)} cities.", file=sys.stderr)
+    print(f"Qualified (bad website + real contact email found): {len(qualified)} -> {args.output.replace('.csv', '_qualified.csv')}", file=sys.stderr)
+
+
+def write_outputs(args, all_rows, qualified):
     fieldnames = ["name", "city", "url", "phone", "address", "verdict", "score", "flags",
                   "load_time_s", "notes", "found_email"]
     with open(args.output, "w", newline="", encoding="utf-8") as f:
@@ -115,9 +164,6 @@ def main():
         writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()
         writer.writerows(qualified)
-
-    print(f"\nChecked {len(all_rows)} companies total across {len(CITIES)} cities.", file=sys.stderr)
-    print(f"Qualified (bad website + real contact email found): {len(qualified)} -> {qualified_path}", file=sys.stderr)
 
 
 if __name__ == "__main__":

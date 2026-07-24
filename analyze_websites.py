@@ -99,6 +99,10 @@ def analyze_one(name, url, check_contact_page=False):
     if not re.match(r"^https?://", url, re.I):
         url = "http://" + url
 
+    if url.lower().split("?")[0].endswith(BINARY_EXTENSIONS):
+        return {"verdict": "bad", "score": FLAG_WEIGHTS["no_website"], "flags": "no_website",
+                "load_time_s": "", "notes": "listed 'website' is a direct file link, not a page", "found_email": ""}
+
     try:
         status, body, final_url, elapsed = fetch(url)
         load_time = round(elapsed, 2)
@@ -154,7 +158,19 @@ def analyze_one(name, url, check_contact_page=False):
 
 
 EMAIL_RE = re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
-IGNORE_DOMAINS = ("sentry.io", "example.com", "wixpress.com", "godaddy.com", "schema.org")
+IGNORE_DOMAINS = ("sentry.io", "example.com", "wixpress.com", "godaddy.com", "schema.org",
+                   "adobe.com", "w3.org", "google.com", "gstatic.com", "facebook.com",
+                   "cloudflare.com", "wordpress.org", "wordpress.com")
+BINARY_EXTENSIONS = (".jpg", ".jpeg", ".png", ".gif", ".pdf", ".svg", ".webp", ".ico", ".bmp")
+
+
+def looks_plausible(addr):
+    local = addr.split("@")[0]
+    if not re.match(r"^[a-zA-Z0-9](?:[a-zA-Z0-9._%+\-]*[a-zA-Z0-9])?$", local):
+        return False
+    if len(local) < 2:
+        return False
+    return True
 
 
 def extract_email(body):
@@ -163,10 +179,11 @@ def extract_email(body):
     Never guesses/invents an address."""
     mailtos = re.findall(r'mailto:([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})', body, re.I)
     for addr in mailtos:
-        if not addr.lower().endswith(IGNORE_DOMAINS):
+        if not addr.lower().endswith(IGNORE_DOMAINS) and looks_plausible(addr):
             return addr
     for addr in EMAIL_RE.findall(body):
-        if not addr.lower().endswith(IGNORE_DOMAINS) and not re.search(r"\.(png|jpg|jpeg|gif|svg|webp)$", addr, re.I):
+        if (not addr.lower().endswith(IGNORE_DOMAINS) and looks_plausible(addr)
+                and not re.search(r"\.(png|jpg|jpeg|gif|svg|webp)$", addr, re.I)):
             return addr
     return ""
 

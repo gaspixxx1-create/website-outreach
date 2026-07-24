@@ -25,7 +25,10 @@ import urllib.request
 
 USER_AGENT = "website-outreach-tool/1.0 (personal lead-gen script)"
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
-OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+OVERPASS_MIRRORS = [
+    "https://overpass-api.de/api/interpreter",
+]
+OVERPASS_URL = OVERPASS_MIRRORS[0]
 
 # Map common niche keywords to OSM tag queries. Extend as needed.
 NICHE_TAGS = {
@@ -61,6 +64,10 @@ NICHE_TAGS = {
     "landscaping": ['craft=gardener'],
     "insurance": ['office=insurance'],
     "chiropractor": ['healthcare=chiropractor'],
+    "driving school": ['amenity=driving_school'],
+    "driving schools": ['amenity=driving_school'],
+    "rijschool": ['amenity=driving_school'],
+    "rijscholen": ['amenity=driving_school'],
 }
 
 
@@ -73,6 +80,26 @@ def geocode(location):
         raise SystemExit(f"Could not geocode location: {location!r}")
     lat, lon = float(data[0]["lat"]), float(data[0]["lon"])
     return lat, lon
+
+
+def build_overpass_country_query(niche, iso2):
+    niche_key = niche.strip().lower()
+    tag_filters = NICHE_TAGS.get(niche_key)
+    area_sel = f'area["ISO3166-1"="{iso2.upper()}"][admin_level=2]->.a;'
+
+    clauses = []
+    if tag_filters:
+        for tag in tag_filters:
+            k, v = tag.split("=")
+            clauses.append(f'node["{k}"="{v}"](area.a);')
+            clauses.append(f'way["{k}"="{v}"](area.a);')
+    else:
+        escaped = niche.replace('"', '')
+        clauses.append(f'node["name"~"{escaped}",i](area.a);')
+        clauses.append(f'way["name"~"{escaped}",i](area.a);')
+
+    body = f"[out:json][timeout:60];{area_sel}(" + "".join(clauses) + ");out center tags;"
+    return body
 
 
 def build_overpass_query(niche, lat, lon, radius):
@@ -95,11 +122,20 @@ def build_overpass_query(niche, lat, lon, radius):
     return body
 
 
-def query_overpass(query):
+def query_overpass(query, attempts=5):
     data = urllib.parse.urlencode({"data": query}).encode("utf-8")
-    req = urllib.request.Request(OVERPASS_URL, data=data, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(req, timeout=60) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+    last_err = None
+    for i in range(attempts):
+        mirror = OVERPASS_MIRRORS[i % len(OVERPASS_MIRRORS)]
+        try:
+            req = urllib.request.Request(mirror, data=data, headers={"User-Agent": USER_AGENT})
+            with urllib.request.urlopen(req, timeout=90) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except Exception as e:
+            last_err = e
+            print(f"  overpass mirror {mirror} failed ({e}), retrying...", file=sys.stderr)
+            time.sleep(5 * (i + 1))
+    raise last_err
 
 
 def extract_row(el):
