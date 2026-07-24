@@ -64,6 +64,7 @@ NICHE_TAGS = {
     "landscaping": ['craft=gardener'],
     "insurance": ['office=insurance'],
     "chiropractor": ['healthcare=chiropractor'],
+    "pharmacy": ['amenity=pharmacy'],
     "driving school": ['amenity=driving_school'],
     "driving schools": ['amenity=driving_school'],
     "rijschool": ['amenity=driving_school'],

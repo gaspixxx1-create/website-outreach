@@ -80,7 +80,8 @@ def main():
                 seen_names.add(row["name"])
                 companies.append(row)
 
-        print(f"  found {len(companies)} candidates with a listed website nationwide", file=sys.stderr)
+        total_candidates = len(companies)
+        print(f"  found {total_candidates} candidates with a listed website nationwide", file=sys.stderr)
         random.shuffle(companies)
         companies = companies[: args.check_cap]
 
@@ -98,8 +99,16 @@ def main():
             time.sleep(0.2)
 
         write_outputs(args, all_rows, qualified)
+        # Only truly exhausted if the check-cap covered the ENTIRE remaining
+        # pool (not just the post-cap slice) and we checked all of it without
+        # stopping early because today's target was already reached.
+        exhausted = total_candidates <= args.check_cap and len(all_rows) == len(companies)
+        write_summary(args, niche=args.niche, country=args.country.upper(),
+                      candidates_found=total_candidates, checked=len(all_rows),
+                      qualified=len(qualified), exhausted=exhausted)
         print(f"\nChecked {len(all_rows)} companies nationwide in {args.country.upper()}.", file=sys.stderr)
         print(f"Qualified: {len(qualified)} -> {args.output.replace('.csv', '_qualified.csv')}", file=sys.stderr)
+        print(f"Exhausted: {exhausted}", file=sys.stderr)
         return
 
     cities = CITIES[:]
@@ -149,6 +158,13 @@ def main():
     write_outputs(args, all_rows, qualified)
     print(f"\nChecked {len(all_rows)} companies total across {len(CITIES)} cities.", file=sys.stderr)
     print(f"Qualified (bad website + real contact email found): {len(qualified)} -> {args.output.replace('.csv', '_qualified.csv')}", file=sys.stderr)
+
+
+def write_summary(args, **fields):
+    import json
+    summary_path = args.output.replace(".csv", "_summary.json")
+    with open(summary_path, "w", encoding="utf-8") as f:
+        json.dump(fields, f)
 
 
 def write_outputs(args, all_rows, qualified):
