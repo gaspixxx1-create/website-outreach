@@ -73,10 +73,32 @@ def run_batch(niche, country, target, batch_num):
     return summary, qualified_rows, qualified_path
 
 
+def checkpoint(state, note):
+    """Persist progress immediately so a killed/timed-out process doesn't
+    lose everything found so far - push state + contacted.csv after every
+    pass, not just at the very end."""
+    save_state(state)
+    try:
+        subprocess.run(["git", "add", "contacted.csv", STATE_FILE], check=False, timeout=30)
+        subprocess.run(["git", "commit", "-m", f"Campaign checkpoint: {note}"], check=False, timeout=30)
+        subprocess.run(["git", "push"], check=False, timeout=60)
+    except Exception as e:
+        print(f"checkpoint push failed (non-fatal): {e}", file=sys.stderr)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--daily-target", type=int, default=20)
     args = ap.parse_args()
+
+    print(f"daily_campaign.py starting. cwd={os.getcwd()} python={sys.version.split()[0]}", file=sys.stderr, flush=True)
+    try:
+        import urllib.request
+        urllib.request.urlopen("https://overpass-api.de/api/interpreter", timeout=10)
+    except Exception as e:
+        print(f"WARNING: network connectivity check to overpass-api.de failed: {e}", file=sys.stderr, flush=True)
+    else:
+        print("Network connectivity check to overpass-api.de: OK", file=sys.stderr, flush=True)
 
     state = load_state()
     all_qualified = []
@@ -100,6 +122,7 @@ def main():
         all_qualified.extend(qualified_rows)
         if qualified_rows:
             all_qualified_paths.append(qualified_path)
+            checkpoint(state, f"pass {len(passes)} ({niche}/{country}): {len(qualified_rows)} found, {len(all_qualified)}/{args.daily_target} total")
 
         if summary.get("exhausted"):
             print(f"{niche} in {country} is exhausted (checked {summary.get('checked')} of {summary.get('candidates_found')} available).", file=sys.stderr)
