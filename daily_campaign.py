@@ -132,10 +132,12 @@ def main():
                 state["country_index"] += 1
                 if state["country_index"] < len(COUNTRIES):
                     print(f"All niches exhausted for {country}. Advancing to {COUNTRIES[state['country_index']]}.", file=sys.stderr)
-        else:
-            # Pool not exhausted (either hit today's target, or there's more
-            # left for tomorrow) - stay on this (country, niche) next time.
-            break
+        # If not exhausted, the pool has more candidates than we checked this
+        # pass - loop again on the SAME (niche, country) with a fresh shuffle
+        # (contacted.csv now excludes what we just found) until the daily
+        # target is hit or MAX_PASSES_PER_DAY runs out. Do NOT break here -
+        # that was the bug: it used to stop after one pass even when nowhere
+        # near the daily target, as long as the niche wasn't exhausted.
 
     # Combine all qualified rows from every pass today into one CSV.
     fieldnames = ["name", "city", "url", "phone", "address", "verdict", "score", "flags",
